@@ -1,7 +1,14 @@
 <?php
-$conn = mysqli_connect("localhost", "root", "", "Bacalando_Inloran_db");
+$conn = mysqli_connect(
+    "localhost",
+    "root",
+    "",
+    "construction_materials_db"
+);
+
 if (!$conn) {
-    die("Connection failed: " . mysqli_connect_error());
-    
- }
+    die("Database connection failed: " . mysqli_connect_error());
+}
+
+mysqli_set_charset($conn, "utf8mb4");
 ?>
