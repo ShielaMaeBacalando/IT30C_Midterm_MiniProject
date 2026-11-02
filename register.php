@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 require_once "db.php";
@@ -5,11 +6,12 @@ require_once "db.php";
 $message = "";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $full_name = trim($_POST["full_name"] ?? "");
     $username = trim($_POST["username"] ?? "");
     $password = $_POST["password"] ?? "";
     $confirm_password = $_POST["confirm_password"] ?? "";
 
-    if ($username === "" || $password === "") {
+    if ($full_name === "" || $username === "" || $password === "") {
         $message = "Please fill in all required fields.";
     } elseif ($password !== $confirm_password) {
         $message = "Passwords do not match.";
@@ -20,6 +22,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $conn,
             "SELECT id FROM users WHERE username = ?"
         );
+
         mysqli_stmt_bind_param($check, "s", $username);
         mysqli_stmt_execute($check);
         mysqli_stmt_store_result($check);
@@ -34,14 +37,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $stmt = mysqli_prepare(
                 $conn,
-                "INSERT INTO users (username, password) VALUES (?, ?)"
+                "INSERT INTO users (full_name, username, password)
+                 VALUES (?, ?, ?)"
             );
+
             mysqli_stmt_bind_param(
                 $stmt,
-                "ss",
+                "sss",
+                $full_name,
                 $username,
                 $hashed_password
-                
             );
 
             if (mysqli_stmt_execute($stmt)) {
@@ -82,6 +87,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <?php endif; ?>
 
         <form method="POST" action="register.php">
+
+            <input type="text" name="full_name"
+                   placeholder="Full Name"
+                   maxlength="100" required>
+
             <input type="text" name="username"
                    placeholder="Username"
                    maxlength="50" required>
