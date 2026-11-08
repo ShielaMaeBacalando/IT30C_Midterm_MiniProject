@@ -745,14 +745,9 @@ body {
 
     </header>
 
-    <!-- ======================================
-         MAIN CONTENT
-    ======================================= -->
+
 
     <main class="main-content">
-
-        <!-- PAGE HEADING -->
-
         <div class="page-heading">
 
             <div>
@@ -761,7 +756,6 @@ body {
 
                 <p>
                     Welcome back, <?= htmlspecialchars($username) ?>!
-                    Here's your system overview.
                 </p>
 
             </div>
@@ -786,10 +780,7 @@ body {
 
         </div>
 
-        <!-- ======================================
-             DASHBOARD OVERVIEW
-        ======================================= -->
-
+        
         <section id="overview">
 
             <div class="stats">
@@ -1186,9 +1177,7 @@ body {
 
     </main>
 
-    <!-- ======================================
-         FOOTER
-    ======================================= -->
+  
 
     <footer class="footer">
 
@@ -1205,17 +1194,13 @@ body {
 
 </div>
 
-<!-- ======================================
-     CHART.JS LIBRARY
-====================================== -->
+
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 
-// ======================================
-// DATABASE DATA FROM PHP
-// ======================================
+
 
 const statusLabels = <?= json_encode(
     $statusLabels,
@@ -1239,17 +1224,12 @@ const issueLabels = <?= json_encode(
 const issueValues = <?= json_encode($issueValues) ?>;
 
 
-// ======================================
-// COMMON CHART SETTINGS
-// ======================================
 
 Chart.defaults.font.family = "Arial";
 Chart.defaults.color = "#64748B";
 
 
-// ======================================
-// GRAPH 1: MATERIAL REQUEST STATUS
-// ======================================
+
 
 new Chart(document.getElementById("statusChart"), {
 
@@ -1307,9 +1287,6 @@ new Chart(document.getElementById("statusChart"), {
 });
 
 
-// ======================================
-// GRAPH 2: REQUESTS PER PROJECT
-// ======================================
 
 new Chart(document.getElementById("projectChart"), {
 

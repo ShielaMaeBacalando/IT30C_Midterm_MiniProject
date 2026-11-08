@@ -479,7 +479,7 @@ function e($value) {
         </table>
     </div>
 
-    <!-- EDIT MATERIAL FORM -->
+   
     <?php
     if (isset($_GET["edit"])):
 
