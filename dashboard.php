@@ -3,9 +3,15 @@
 session_start();
 require_once "db.php";
 
-// Check if user is logged in.
+// Require login
 if (!isset($_SESSION["user_id"])) {
     header("Location: index.php");
+    exit;
+}
+
+// Admin-only dashboard
+if ($_SESSION["role"] !== "Admin") {
+    header("Location: user_dashboard.php");
     exit;
 }
 
