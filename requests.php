@@ -31,7 +31,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         // Validate project
         $project_check = $conn->prepare(
-            "SELECT project_id FROM projects WHERE project_id = ?"
+            "SELECT material_id, material_code, material_name, unit_of_measure
+FROM materials
+WHERE material_status = 'Active'
+ORDER BY material_name ASC"
         );
 
         $project_check->bind_param("i", $project_id);

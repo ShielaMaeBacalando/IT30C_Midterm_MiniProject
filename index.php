@@ -3,7 +3,11 @@ session_start();
 require_once "db.php";
 
 if (isset($_SESSION["user_id"])) {
-    header("Location: dashboard.php");
+    if ($_SESSION["role"] === "Admin") {
+        header("Location: dashboard.php");
+    } else {
+        header("Location: user_dashboard.php");
+    }
     exit;
 }
 
@@ -46,8 +50,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $_SESSION["username"] = $db_username;
         $_SESSION["role"] = $db_role;
 
-        mysqli_stmt_close($stmt);
-        mysqli_close($conn);
+        if ($db_role === "Admin") {
+    header("Location: dashboard.php");
+} else {
+    header("Location: user_dashboard.php");
+}
+exit;
 
         header("Location: dashboard.php");
         exit;
