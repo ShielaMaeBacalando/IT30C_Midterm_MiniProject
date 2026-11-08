@@ -10,7 +10,13 @@ if (!isset($_SESSION["user_id"])) {
 }
 
 $user_id = (int)$_SESSION["user_id"];
+$user_role = $_SESSION["role"] ?? "";
 $message = "";
+
+// Dashboard link based on role
+$dashboard_link = ($user_role === "Admin")
+    ? "dashboard.php"
+    : "user_dashboard.php";
 
 // Handle new material request
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
@@ -27,14 +33,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         count($material_ids) !== count($quantities)
     ) {
         $message = "Please select a project and add at least one material.";
+
     } else {
 
-        // Validate project
+        // Validate selected project
         $project_check = $conn->prepare(
-            "SELECT material_id, material_code, material_name, unit_of_measure
-FROM materials
-WHERE material_status = 'Active'
-ORDER BY material_name ASC"
+            "SELECT project_id
+             FROM projects
+             WHERE project_id = ?
+             AND project_status = 'Ongoing'"
         );
 
         $project_check->bind_param("i", $project_id);
@@ -46,14 +53,16 @@ ORDER BY material_name ASC"
         $project_check->close();
 
         if (!$project_exists) {
-            $message = "Selected project does not exist.";
+
+            $message = "Selected project does not exist or is not ongoing.";
+
         } else {
 
             $valid_items = [];
             $seen_materials = [];
             $invalid_items = false;
 
-            // Validate every requested material and quantity
+            // Validate every material and quantity
             foreach ($material_ids as $index => $material_value) {
 
                 $material_id = filter_var(
@@ -76,7 +85,7 @@ ORDER BY material_name ASC"
 
                 $quantity = (float)$quantity_value;
 
-                // Prevent duplicate materials in one request
+                // Prevent duplicate materials
                 if (isset($seen_materials[$material_id])) {
                     $invalid_items = true;
                     break;
@@ -84,9 +93,12 @@ ORDER BY material_name ASC"
 
                 $seen_materials[$material_id] = true;
 
-                // Check if material exists
+                // Check if material exists and is active
                 $material_check = $conn->prepare(
-                    "SELECT material_id FROM materials WHERE material_id = ?"
+                    "SELECT material_id
+                     FROM materials
+                     WHERE material_id = ?
+                     AND material_status = 'Active'"
                 );
 
                 $material_check->bind_param("i", $material_id);
@@ -109,18 +121,21 @@ ORDER BY material_name ASC"
             }
 
             if ($invalid_items) {
-                $message = "Please check your materials and quantities. Avoid duplicate materials.";
+
+                $message = "Please check your materials and quantities. Avoid duplicate or inactive materials.";
+
             } else {
 
                 // Save request and items together
                 try {
+
                     $conn->begin_transaction();
 
-                    // Create the main request
+                    // Create main material request
                     $request_stmt = $conn->prepare(
                         "INSERT INTO material_requests
-                        (project_id, requested_by, request_date)
-                        VALUES (?, ?, CURDATE())"
+                         (project_id, requested_by, request_date)
+                         VALUES (?, ?, CURDATE())"
                     );
 
                     $request_stmt->bind_param(
@@ -138,8 +153,8 @@ ORDER BY material_name ASC"
                     // Insert requested materials
                     $item_stmt = $conn->prepare(
                         "INSERT INTO request_items
-                        (request_id, material_id, requested_quantity)
-                        VALUES (?, ?, ?)"
+                         (request_id, material_id, requested_quantity)
+                         VALUES (?, ?, ?)"
                     );
 
                     foreach ($valid_items as $item) {
@@ -180,7 +195,7 @@ if (isset($_GET["success"])) {
     $message = "Material request submitted successfully!";
 }
 
-// Get available projects
+// Get available ongoing projects
 $projects = $conn->query(
     "SELECT project_id, project_code, project_name, project_site
      FROM projects
@@ -188,14 +203,15 @@ $projects = $conn->query(
      ORDER BY project_name ASC"
 );
 
-// Get available materials
+// Get active materials only
 $materials = $conn->query(
     "SELECT material_id, material_code, material_name, unit_of_measure
      FROM materials
+     WHERE material_status = 'Active'
      ORDER BY material_name ASC"
 );
 
-// Prepare material options for the form
+// Prepare material options
 $material_options = [];
 
 while ($material = $materials->fetch_assoc()) {
@@ -208,49 +224,55 @@ $request_items = null;
 
 if (isset($_GET["view"])) {
 
-    $view_id = (int)$_GET["view"];
+    $view_id = filter_input(INPUT_GET, "view", FILTER_VALIDATE_INT);
 
-    $detail_stmt = $conn->prepare(
-        "SELECT
-            mr.request_id,
-            mr.request_date,
-            mr.request_status,
-            p.project_code,
-            p.project_name,
-            p.project_site,
-            u.full_name
-         FROM material_requests mr
-         INNER JOIN projects p ON mr.project_id = p.project_id
-         INNER JOIN users u ON mr.requested_by = u.id
-         WHERE mr.request_id = ?"
-    );
+    if ($view_id && $view_id > 0) {
 
-    $detail_stmt->bind_param("i", $view_id);
-    $detail_stmt->execute();
-
-    $detail_result = $detail_stmt->get_result();
-    $view_request = $detail_result->fetch_assoc();
-
-    $detail_stmt->close();
-
-    if ($view_request) {
-
-        $items_stmt = $conn->prepare(
+        $detail_stmt = $conn->prepare(
             "SELECT
-                m.material_code,
-                m.material_name,
-                m.unit_of_measure,
-                ri.requested_quantity
-             FROM request_items ri
-             INNER JOIN materials m
-                ON ri.material_id = m.material_id
-             WHERE ri.request_id = ?"
+                mr.request_id,
+                mr.request_date,
+                mr.request_status,
+                p.project_code,
+                p.project_name,
+                p.project_site,
+                u.full_name
+             FROM material_requests mr
+             INNER JOIN projects p
+                ON mr.project_id = p.project_id
+             INNER JOIN users u
+                ON mr.requested_by = u.id
+             WHERE mr.request_id = ?"
         );
 
-        $items_stmt->bind_param("i", $view_id);
-        $items_stmt->execute();
+        $detail_stmt->bind_param("i", $view_id);
+        $detail_stmt->execute();
 
-        $request_items = $items_stmt->get_result();
+        $detail_result = $detail_stmt->get_result();
+        $view_request = $detail_result->fetch_assoc();
+
+        $detail_stmt->close();
+
+        if ($view_request) {
+
+            $items_stmt = $conn->prepare(
+                "SELECT
+                    m.material_code,
+                    m.material_name,
+                    m.unit_of_measure,
+                    ri.requested_quantity
+                 FROM request_items ri
+                 INNER JOIN materials m
+                    ON ri.material_id = m.material_id
+                 WHERE ri.request_id = ?"
+            );
+
+            $items_stmt->bind_param("i", $view_id);
+            $items_stmt->execute();
+
+            $request_items = $items_stmt->get_result();
+            $items_stmt->close();
+        }
     }
 }
 
@@ -265,9 +287,12 @@ $requests = $conn->query(
         u.full_name,
         COUNT(ri.request_item_id) AS item_count
      FROM material_requests mr
-     INNER JOIN projects p ON mr.project_id = p.project_id
-     INNER JOIN users u ON mr.requested_by = u.id
-     LEFT JOIN request_items ri ON mr.request_id = ri.request_id
+     INNER JOIN projects p
+        ON mr.project_id = p.project_id
+     INNER JOIN users u
+        ON mr.requested_by = u.id
+     LEFT JOIN request_items ri
+        ON mr.request_id = ri.request_id
      GROUP BY
         mr.request_id,
         mr.request_date,
@@ -277,220 +302,265 @@ $requests = $conn->query(
         u.full_name
      ORDER BY mr.request_id DESC"
 );
+
+function e($value) {
+    return htmlspecialchars(
+        (string)$value,
+        ENT_QUOTES,
+        "UTF-8"
+    );
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Material Requests</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+<title>Material Requests</title>
 
-        body {
-            background: #F5F1E8;
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 25px;
-            color: #34495E;
-        }
+<style>
 
-        .container {
-            max-width: 1100px;
-            margin: auto;
-            background: #FFFEFA;
-            padding: 30px;
-            border-radius: 18px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.06);
-        }
+* {
+    box-sizing: border-box;
+}
 
-        h2 {
-            margin-top: 0;
-        }
+body {
+    background: #F5F1E8;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 25px;
+    color: #34495E;
+}
 
-        input, select {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0 15px;
-            border: 1px solid #D5DEE8;
-            border-radius: 8px;
-        }
+.container {
+    max-width: 1100px;
+    margin: auto;
+    background: #FFFEFA;
+    padding: 30px;
+    border-radius: 18px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+}
 
-        button, .btn {
-            display: inline-block;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            background: #647F9A;
-            color: white;
-            cursor: pointer;
-            text-decoration: none;
-            font-size: 14px;
-        }
+h2 {
+    margin-top: 0;
+}
 
-        button:hover, .btn:hover {
-            background: #49647F;
-        }
+input, select {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0 15px;
+    border: 1px solid #D5DEE8;
+    border-radius: 8px;
+}
 
-        .remove {
-            background: #B96B6B;
-        }
+button, .btn {
+    display: inline-block;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    background: #647F9A;
+    color: white;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 14px;
+}
 
-        .remove:hover {
-            background: #984F4F;
-        }
+button:hover, .btn:hover {
+    background: #49647F;
+}
 
-        .message {
-            padding: 12px;
-            background: #E7EEF5;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
+.remove {
+    background: #B96B6B;
+}
 
-        .back {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #647F9A;
-            text-decoration: none;
-        }
+.remove:hover {
+    background: #984F4F;
+}
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
+.message {
+    padding: 12px;
+    background: #E7EEF5;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
 
-        th, td {
-            padding: 13px;
-            text-align: left;
-            border-bottom: 1px solid #E5EAF0;
-        }
+.back {
+    display: inline-block;
+    margin-bottom: 20px;
+    color: #647F9A;
+    text-decoration: none;
+}
 
-        th {
-            background: #E7EEF5;
-        }
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
 
-        .item-row {
-            background: #F8FAFC;
-            padding: 15px;
-            border: 1px solid #E5EAF0;
-            border-radius: 10px;
-            margin-bottom: 12px;
-        }
+th, td {
+    padding: 13px;
+    text-align: left;
+    border-bottom: 1px solid #E5EAF0;
+}
 
-        .item-row label {
-            display: block;
-            font-weight: bold;
-            margin-top: 5px;
-        }
+th {
+    background: #E7EEF5;
+}
 
-        .item-row input,
-        .item-row select {
-            margin-bottom: 8px;
-        }
+.item-row {
+    background: #F8FAFC;
+    padding: 15px;
+    border: 1px solid #E5EAF0;
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
 
-        .section {
-            margin-top: 30px;
-        }
+.item-row label {
+    display: block;
+    font-weight: bold;
+    margin-top: 5px;
+}
 
-        .info {
-            background: #E7EEF5;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-        }
+.item-row input,
+.item-row select {
+    margin-bottom: 8px;
+}
 
-        @media(max-width: 700px) {
-            .container {
-                padding: 18px;
-                overflow-x: auto;
-            }
+.section {
+    margin-top: 30px;
+}
 
-            table {
-                min-width: 700px;
-            }
-        }
-    </style>
+.info {
+    background: #E7EEF5;
+    padding: 15px;
+    border-radius: 10px;
+    margin: 15px 0;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+@media(max-width: 700px) {
+
+    .container {
+        padding: 18px;
+    }
+
+    table {
+        min-width: 700px;
+    }
+}
+
+</style>
+
 </head>
 
 <body>
 
 <div class="container">
 
-    <a class="back" href="dashboard.php">
+    <a class="back" href="<?= e($dashboard_link) ?>">
         ← Back to Dashboard
     </a>
 
     <h2>Material Requests</h2>
+
     <p>Submit and view construction project material requests.</p>
 
     <?php if ($message !== ""): ?>
+
         <p class="message">
-            <?= htmlspecialchars($message) ?>
+            <?= e($message) ?>
         </p>
+
     <?php endif; ?>
+
 
     <?php if ($view_request): ?>
 
         <div class="section">
 
-            <h3>Request Details #<?= $view_request["request_id"] ?></h3>
+            <h3>Request Details #<?= e($view_request["request_id"]) ?></h3>
 
             <div class="info">
-                <p><strong>Project:</strong>
-                    <?= htmlspecialchars($view_request["project_code"]) ?>
-                    - <?= htmlspecialchars($view_request["project_name"]) ?>
+
+                <p>
+                    <strong>Project:</strong>
+                    <?= e($view_request["project_code"]) ?>
+                    - <?= e($view_request["project_name"]) ?>
                 </p>
 
-                <p><strong>Project Site:</strong>
-                    <?= htmlspecialchars($view_request["project_site"]) ?>
+                <p>
+                    <strong>Project Site:</strong>
+                    <?= e($view_request["project_site"]) ?>
                 </p>
 
-                <p><strong>Requested By:</strong>
-                    <?= htmlspecialchars($view_request["full_name"]) ?>
+                <p>
+                    <strong>Requested By:</strong>
+                    <?= e($view_request["full_name"]) ?>
                 </p>
 
-                <p><strong>Request Date:</strong>
-                    <?= htmlspecialchars($view_request["request_date"]) ?>
+                <p>
+                    <strong>Request Date:</strong>
+                    <?= e($view_request["request_date"]) ?>
                 </p>
 
-                <p><strong>Status:</strong>
-                    <?= htmlspecialchars($view_request["request_status"]) ?>
+                <p>
+                    <strong>Status:</strong>
+                    <?= e($view_request["request_status"]) ?>
                 </p>
+
             </div>
 
             <h3>Requested Materials</h3>
 
-            <table>
-                <thead>
-                    <tr>
-                        <th>Material Code</th>
-                        <th>Material Name</th>
-                        <th>Quantity</th>
-                        <th>Unit</th>
-                    </tr>
-                </thead>
+            <div class="table-wrapper">
 
-                <tbody>
-                    <?php while ($item = $request_items->fetch_assoc()): ?>
+                <table>
+
+                    <thead>
                         <tr>
-                            <td><?= htmlspecialchars($item["material_code"]) ?></td>
-                            <td><?= htmlspecialchars($item["material_name"]) ?></td>
-                            <td><?= number_format((float)$item["requested_quantity"], 2) ?></td>
-                            <td><?= htmlspecialchars($item["unit_of_measure"]) ?></td>
+                            <th>Material Code</th>
+                            <th>Material Name</th>
+                            <th>Quantity</th>
+                            <th>Unit</th>
                         </tr>
-                    <?php endwhile; ?>
-                </tbody>
-            </table>
+                    </thead>
+
+                    <tbody>
+
+                        <?php while ($item = $request_items->fetch_assoc()): ?>
+
+                            <tr>
+                                <td><?= e($item["material_code"]) ?></td>
+                                <td><?= e($item["material_name"]) ?></td>
+                                <td>
+                                    <?= number_format(
+                                        (float)$item["requested_quantity"],
+                                        2
+                                    ) ?>
+                                </td>
+                                <td><?= e($item["unit_of_measure"]) ?></td>
+                            </tr>
+
+                        <?php endwhile; ?>
+
+                    </tbody>
+
+                </table>
+
+            </div>
 
             <br>
 
-            <a href="requests.php" class="btn">Back to Requests</a>
+            <a href="requests.php" class="btn">
+                Back to Requests
+            </a>
 
         </div>
 
@@ -507,16 +577,21 @@ $requests = $conn->query(
                     <label><strong>Select Construction Project</strong></label>
 
                     <select name="project_id" required>
+
                         <option value="">-- Select Project --</option>
 
                         <?php while ($project = $projects->fetch_assoc()): ?>
-                            <option value="<?= $project["project_id"] ?>">
-                                <?= htmlspecialchars(
+
+                            <option value="<?= e($project["project_id"]) ?>">
+
+                                <?= e(
                                     $project["project_code"] . " - " .
                                     $project["project_name"] . " (" .
                                     $project["project_site"] . ")"
                                 ) ?>
+
                             </option>
+
                         <?php endwhile; ?>
 
                     </select>
@@ -530,29 +605,36 @@ $requests = $conn->query(
                             <label>Material</label>
 
                             <select name="material_id[]" required>
+
                                 <option value="">-- Select Material --</option>
 
                                 <?php foreach ($material_options as $material): ?>
-                                    <option value="<?= $material["material_id"] ?>">
-                                        <?= htmlspecialchars(
+
+                                    <option value="<?= e($material["material_id"]) ?>">
+
+                                        <?= e(
                                             $material["material_code"] . " - " .
                                             $material["material_name"] . " (" .
                                             $material["unit_of_measure"] . ")"
                                         ) ?>
+
                                     </option>
+
                                 <?php endforeach; ?>
 
                             </select>
 
                             <label>Requested Quantity</label>
 
-                            <input type="number"
-                                   name="requested_quantity[]"
-                                   min="0.01"
-                                   max="99999999.99"
-                                   step="0.01"
-                                   placeholder="Enter quantity"
-                                   required>
+                            <input
+                                type="number"
+                                name="requested_quantity[]"
+                                min="0.01"
+                                max="99999999.99"
+                                step="0.01"
+                                placeholder="Enter quantity"
+                                required
+                            >
 
                         </div>
 
@@ -575,112 +657,147 @@ $requests = $conn->query(
         <?php else: ?>
 
             <div class="info">
+
                 <strong>Cannot submit a request yet.</strong>
+
                 <p>
-                    You need at least one Ongoing project and one registered
-                    material before submitting a request.
+                    You need at least one Ongoing project and one active
+                    registered material before submitting a request.
                 </p>
-                <a href="projects.php" class="btn">Manage Projects</a>
-                <a href="materials.php" class="btn">Manage Materials</a>
+
+                <?php if ($user_role === "Admin"): ?>
+
+                    <a href="projects.php" class="btn">Manage Projects</a>
+                    <a href="materials.php" class="btn">Manage Materials</a>
+
+                <?php endif; ?>
+
             </div>
 
         <?php endif; ?>
 
     <?php endif; ?>
 
+
     <hr class="section">
 
     <h3>Submitted Requests</h3>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Request ID</th>
-                <th>Project</th>
-                <th>Requested By</th>
-                <th>Date</th>
-                <th>Items</th>
-                <th>Status</th>
-                <th>Action</th>
-            </tr>
-        </thead>
+    <div class="table-wrapper">
 
-        <tbody>
+        <table>
 
-        <?php if ($requests && $requests->num_rows > 0): ?>
-
-            <?php while ($request = $requests->fetch_assoc()): ?>
+            <thead>
 
                 <tr>
-                    <td>#<?= $request["request_id"] ?></td>
-
-                    <td>
-                        <?= htmlspecialchars($request["project_code"]) ?>
-                        - <?= htmlspecialchars($request["project_name"]) ?>
-                    </td>
-
-                    <td><?= htmlspecialchars($request["full_name"]) ?></td>
-
-                    <td><?= htmlspecialchars($request["request_date"]) ?></td>
-
-                    <td><?= $request["item_count"] ?></td>
-
-                    <td><?= htmlspecialchars($request["request_status"]) ?></td>
-
-                    <td>
-                        <a class="btn"
-                           href="requests.php?view=<?= $request["request_id"] ?>">
-                            View
-                        </a>
-                    </td>
+                    <th>Request ID</th>
+                    <th>Project</th>
+                    <th>Requested By</th>
+                    <th>Date</th>
+                    <th>Items</th>
+                    <th>Status</th>
+                    <th>Action</th>
                 </tr>
 
-            <?php endwhile; ?>
+            </thead>
 
-        <?php else: ?>
+            <tbody>
 
-            <tr>
-                <td colspan="7">No material requests have been submitted yet.</td>
-            </tr>
+                <?php if ($requests && $requests->num_rows > 0): ?>
 
-        <?php endif; ?>
+                    <?php while ($request = $requests->fetch_assoc()): ?>
 
-        </tbody>
-    </table>
+                        <tr>
+
+                            <td>#<?= e($request["request_id"]) ?></td>
+
+                            <td>
+                                <?= e($request["project_code"]) ?>
+                                - <?= e($request["project_name"]) ?>
+                            </td>
+
+                            <td><?= e($request["full_name"]) ?></td>
+
+                            <td><?= e($request["request_date"]) ?></td>
+
+                            <td><?= e($request["item_count"]) ?></td>
+
+                            <td><?= e($request["request_status"]) ?></td>
+
+                            <td>
+
+                                <a
+                                    class="btn"
+                                    href="requests.php?view=<?= e($request["request_id"]) ?>"
+                                >
+                                    View
+                                </a>
+
+                            </td>
+
+                        </tr>
+
+                    <?php endwhile; ?>
+
+                <?php else: ?>
+
+                    <tr>
+                        <td colspan="7">
+                            No material requests have been submitted yet.
+                        </td>
+                    </tr>
+
+                <?php endif; ?>
+
+            </tbody>
+
+        </table>
+
+    </div>
 
 </div>
 
+
 <script>
-    const addItemButton = document.getElementById("addItem");
-    const itemsContainer = document.getElementById("itemsContainer");
 
-    if (addItemButton) {
-        addItemButton.addEventListener("click", function () {
+const addItemButton = document.getElementById("addItem");
+const itemsContainer = document.getElementById("itemsContainer");
 
-            const firstRow = itemsContainer.querySelector(".item-row");
-            const newRow = firstRow.cloneNode(true);
+if (addItemButton) {
 
-            // Clear selected material and quantity
-            newRow.querySelector("select").selectedIndex = 0;
-            newRow.querySelector("input").value = "";
+    addItemButton.addEventListener("click", function () {
 
-            // Add remove button
-            const removeButton = document.createElement("button");
+        const firstRow = itemsContainer.querySelector(".item-row");
+        const newRow = firstRow.cloneNode(true);
 
-            removeButton.type = "button";
-            removeButton.textContent = "Remove Material";
-            removeButton.className = "remove";
+        // Clear selected material and quantity
+        newRow.querySelector("select").selectedIndex = 0;
+        newRow.querySelector("input").value = "";
 
-            removeButton.addEventListener("click", function () {
-                newRow.remove();
-            });
+        // Create remove button
+        const removeButton = document.createElement("button");
 
-            newRow.appendChild(removeButton);
+        removeButton.type = "button";
+        removeButton.textContent = "Remove Material";
+        removeButton.className = "remove";
 
-            itemsContainer.appendChild(newRow);
+        removeButton.addEventListener("click", function () {
+            newRow.remove();
         });
-    }
+
+        newRow.appendChild(removeButton);
+
+        itemsContainer.appendChild(newRow);
+
+    });
+
+}
+
 </script>
 
 </body>
 </html>
+
+<?php
+mysqli_close($conn);
+?>
