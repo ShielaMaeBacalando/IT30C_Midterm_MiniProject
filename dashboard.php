@@ -3,9 +3,6 @@
 session_start();
 require_once "db.php";
 
-// ======================================
-// LOGIN AND ADMIN ACCESS PROTECTION
-// ======================================
 
 if (!isset($_SESSION["user_id"])) {
     header("Location: index.php");
@@ -20,9 +17,7 @@ if (($_SESSION["role"] ?? "") !== "Admin") {
 $username = $_SESSION["username"] ?? "User";
 $role = $_SESSION["role"] ?? "Admin";
 
-// ======================================
-// DASHBOARD STATISTICS
-// ======================================
+
 
 $projectCount = 0;
 $materialCount = 0;
@@ -64,9 +59,7 @@ if ($result) {
     $issueCount = (int)$result->fetch_assoc()["total"];
 }
 
-// ======================================
-// GRAPH 1: MATERIAL REQUEST STATUS
-// ======================================
+
 
 $statusLabels = [];
 $statusValues = [];
@@ -84,9 +77,6 @@ if ($statusQuery) {
     }
 }
 
-// ======================================
-// GRAPH 2: REQUESTS PER PROJECT
-// ======================================
 
 $projectLabels = [];
 $projectValues = [];
