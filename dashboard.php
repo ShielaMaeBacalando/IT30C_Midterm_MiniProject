@@ -144,9 +144,6 @@ $issueValues = array_reverse($issueValues);
 
 <title>Admin Dashboard | Construction Materials Allocation</title>
 
-<!-- ======================================
-     CSS DESIGN
-====================================== -->
 
 <style>
 
@@ -162,6 +159,7 @@ body {
     color: #64748B;
     padding: 25px;
 }
+
 
 /* MAIN CONTAINER */
 
